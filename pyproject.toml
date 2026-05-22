@@ -1,0 +1,20 @@
+[project]
+name = "jinitaimei-push-server"
+version = "0.1.0"
+description = "济你太美邮件推送服务"
+requires-python = ">=3.11"
+dependencies = [
+    "aiosmtplib>=3.0.2",
+    "aiosqlite>=0.20.0",
+    "email-validator>=2.2.0",
+    "fastapi>=0.115.0",
+    "pydantic-settings>=2.6.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
