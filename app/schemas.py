@@ -13,6 +13,7 @@ class SubscriptionRequest(BaseModel):
     star_new_activity_enabled: bool = True
     star_registration_enabled: bool = True
     selected_star_module_codes: list[str] = Field(default_factory=list)
+    followed_star_activity_ids: list[int] = Field(default_factory=list)
 
 
 class SubscriptionResponse(BaseModel):

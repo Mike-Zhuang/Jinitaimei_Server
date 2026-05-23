@@ -217,9 +217,10 @@ async def process_star_public_subscription(
     seen = set(subscription.last_seen_star_activity_ids)
     previous_open = set(subscription.last_seen_star_registration_open_ids)
     new_activities = [activity for activity in filtered if str(activity.id) not in seen]
+    followed_ids = {int(value) for value in subscription.followed_star_activity_ids}
 
     for activity in new_activities:
-        if subscription.star_new_activity_enabled:
+        if subscription.star_new_activity_enabled and activity.is_not_started:
             await send_star_activity_mail(subscription, activity, event_type="star_new_activity")
 
     # 老订阅升级到新字段时，先只补当前“报名中”基线，不补发历史报名提醒。
@@ -242,6 +243,7 @@ async def process_star_public_subscription(
             activity_id = str(activity.id)
             if (
                 activity.is_registration_open
+                and activity.id in followed_ids
                 and activity_id in seen
                 and activity_id not in previous_open
             ):

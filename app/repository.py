@@ -16,6 +16,7 @@ class SubscriptionRecord:
     star_new_activity_enabled: bool
     star_registration_enabled: bool
     selected_star_module_codes: list[str]
+    followed_star_activity_ids: list[int]
     last_seen_teaching_notice_id: int | None
     last_seen_teaching_notice_time: str | None
     last_seen_star_activity_ids: list[str]
@@ -34,6 +35,7 @@ class PollingState:
 
 async def upsert_subscription(payload: SubscriptionRequest) -> int:
     module_codes = json.dumps(payload.selected_star_module_codes, ensure_ascii=False)
+    followed_ids = json.dumps(payload.followed_star_activity_ids, ensure_ascii=False)
     async with open_database() as db:
         cursor = await db.execute(
             """
@@ -43,14 +45,16 @@ async def upsert_subscription(payload: SubscriptionRequest) -> int:
                 teaching_notice_enabled,
                 star_new_activity_enabled,
                 star_registration_enabled,
-                selected_star_module_codes
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                selected_star_module_codes,
+                followed_star_activity_ids
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(email) DO UPDATE SET
                 mail_push_enabled = excluded.mail_push_enabled,
                 teaching_notice_enabled = excluded.teaching_notice_enabled,
                 star_new_activity_enabled = excluded.star_new_activity_enabled,
                 star_registration_enabled = excluded.star_registration_enabled,
                 selected_star_module_codes = excluded.selected_star_module_codes,
+                followed_star_activity_ids = excluded.followed_star_activity_ids,
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
@@ -60,6 +64,7 @@ async def upsert_subscription(payload: SubscriptionRequest) -> int:
                 int(payload.star_new_activity_enabled),
                 int(payload.star_registration_enabled),
                 module_codes,
+                followed_ids,
             ),
         )
         await db.commit()
@@ -320,6 +325,7 @@ def _subscription_from_row(row) -> SubscriptionRecord:
         star_new_activity_enabled=bool(row["star_new_activity_enabled"]),
         star_registration_enabled=bool(row["star_registration_enabled"]),
         selected_star_module_codes=json.loads(row["selected_star_module_codes"] or "[]"),
+        followed_star_activity_ids=json.loads(row["followed_star_activity_ids"] or "[]"),
         last_seen_teaching_notice_id=row["last_seen_teaching_notice_id"],
         last_seen_teaching_notice_time=row["last_seen_teaching_notice_time"],
         last_seen_star_activity_ids=json.loads(row["last_seen_star_activity_ids"] or "[]"),

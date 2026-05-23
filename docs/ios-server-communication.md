@@ -27,7 +27,8 @@
   "teaching_notice_enabled": true,
   "star_new_activity_enabled": true,
   "star_registration_enabled": true,
-  "selected_star_module_codes": ["hongwen", "mingde", "shizhi", "qiusuo", "lixing"]
+  "selected_star_module_codes": ["hongwen", "mingde", "shizhi", "qiusuo", "lixing"],
+  "followed_star_activity_ids": [3748, 3763]
 }
 ```
 
@@ -85,10 +86,10 @@
 ### 卓越星公开活动
 
 1. 轮询任务到达允许时间后，请求 STAR 公开活动列表。
-2. 按用户选择的星星类别过滤。
-3. 首次运行把当前活动 ID 写入 `last_seen_star_activity_ids`。
-4. 后续出现新活动时发送“卓越星新活动”邮件。
-5. 报名提醒只在“同一活动已被系统看见过、此前不是报名中、这次轮询变成报名进行中”时发送。
+2. 按用户选择的星星类别过滤，并同步 App 内点铃铛关注的活动 ID。
+3. 首次运行把当前活动 ID 写入 `last_seen_star_activity_ids`，把当前已报名中的活动 ID 写入 `last_seen_star_registration_open_ids`。
+4. “新活动提醒”只针对首次看到且当前状态仍为“未开始报名”的活动。
+5. “开始报名提醒”只针对用户关注过的活动，并且要求该活动此前已被系统见过、之前不是报名中、这次轮询变成报名进行中。
 6. 同一活动的同一次“开始报名”转换只会通知一次。
 
 当前不把用户 STAR Bearer Token 上传给后端；个人星值仍由 App 本地同步。

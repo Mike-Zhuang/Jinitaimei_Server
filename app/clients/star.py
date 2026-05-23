@@ -37,6 +37,23 @@ class StarActivitySummary:
     def is_registration_open(self) -> bool:
         return bool(self.progress_name and "报名进行中" in self.progress_name)
 
+    @property
+    def is_not_started(self) -> bool:
+        if self.progress_name:
+            if "未开始" in self.progress_name:
+                return True
+            if "报名进行中" in self.progress_name:
+                return False
+            if "活动进行中" in self.progress_name:
+                return False
+            if "签到进行中" in self.progress_name:
+                return False
+            if "结束" in self.progress_name or "评价" in self.progress_name:
+                return False
+        if self.activity_start_time is None:
+            return False
+        return self.activity_start_time > datetime.now(UTC)
+
 
 async def fetch_public_activities(pages: int = 3, page_size: int = 10) -> list[StarActivitySummary]:
     async with httpx.AsyncClient(headers=_headers(), timeout=25) as client:

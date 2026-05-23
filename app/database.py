@@ -32,6 +32,7 @@ async def init_database() -> None:
                 star_new_activity_enabled INTEGER NOT NULL DEFAULT 1,
                 star_registration_enabled INTEGER NOT NULL DEFAULT 1,
                 selected_star_module_codes TEXT NOT NULL DEFAULT '[]',
+                followed_star_activity_ids TEXT NOT NULL DEFAULT '[]',
                 last_seen_teaching_notice_id INTEGER,
                 last_seen_teaching_notice_time TEXT,
                 last_seen_star_activity_ids TEXT NOT NULL DEFAULT '[]',
@@ -83,6 +84,12 @@ async def init_database() -> None:
             """
         )
         await _ensure_column(db, "subscriptions", "mail_push_enabled", "INTEGER NOT NULL DEFAULT 0")
+        await _ensure_column(
+            db,
+            "subscriptions",
+            "followed_star_activity_ids",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
         await _ensure_column(
             db,
             "subscriptions",
