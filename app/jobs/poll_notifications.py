@@ -197,9 +197,14 @@ async def process_star_public_subscription(
     subscription: SubscriptionRecord,
     activities: list[StarActivitySummary],
 ) -> None:
-    filtered = filter_star_activities(subscription, activities)
-    current_ids = [str(activity.id) for activity in filtered]
-    current_open_ids = [str(activity.id) for activity in filtered if activity.is_registration_open]
+    selected_activities = filter_star_activities(subscription, activities)
+    tracked_activities = tracked_star_activities(subscription, activities)
+    current_ids = [str(activity.id) for activity in tracked_activities]
+    current_open_ids = [
+        str(activity.id)
+        for activity in tracked_activities
+        if activity.is_registration_open
+    ]
     if not current_ids:
         return
 
@@ -216,7 +221,7 @@ async def process_star_public_subscription(
 
     seen = set(subscription.last_seen_star_activity_ids)
     previous_open = set(subscription.last_seen_star_registration_open_ids)
-    new_activities = [activity for activity in filtered if str(activity.id) not in seen]
+    new_activities = [activity for activity in selected_activities if str(activity.id) not in seen]
     followed_ids = {int(value) for value in subscription.followed_star_activity_ids}
 
     for activity in new_activities:
@@ -239,7 +244,7 @@ async def process_star_public_subscription(
         return
 
     if subscription.star_registration_enabled:
-        for activity in filtered:
+        for activity in tracked_activities:
             activity_id = str(activity.id)
             if (
                 activity.is_registration_open
@@ -356,6 +361,19 @@ def filter_star_activities(
     if not selected:
         return activities
     return [activity for activity in activities if activity.module_code in selected]
+
+
+def tracked_star_activities(
+    subscription: SubscriptionRecord,
+    activities: list[StarActivitySummary],
+) -> list[StarActivitySummary]:
+    followed_ids = {int(value) for value in subscription.followed_star_activity_ids}
+    if not followed_ids:
+        return filter_star_activities(subscription, activities)
+
+    selected = {activity.id for activity in filter_star_activities(subscription, activities)}
+    tracked_ids = selected.union(followed_ids)
+    return [activity for activity in activities if activity.id in tracked_ids]
 
 
 def format_datetime(value: datetime | None) -> str:
