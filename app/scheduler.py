@@ -1,9 +1,9 @@
-from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
 import secrets
+from dataclasses import dataclass
+from datetime import UTC, datetime, time, timedelta
 
 from app.config import Settings, get_settings
-from app.repository import PollingState, get_polling_state, upsert_polling_state
+from app.repository import get_polling_state, upsert_polling_state
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ TASK_STAR_PRIVATE = "star_private"
 
 
 async def should_run_task(task_name: str, now: datetime | None = None) -> PollDecision:
-    current = now or datetime.now(timezone.utc)
+    current = now or datetime.now(UTC)
     state = await get_polling_state(task_name)
     if state and state.next_allowed_at and current < state.next_allowed_at:
         return PollDecision(
@@ -43,7 +43,7 @@ async def finish_task(
     failure_reason: str | None = None,
     now: datetime | None = None,
 ) -> datetime:
-    current = now or datetime.now(timezone.utc)
+    current = now or datetime.now(UTC)
     settings = get_settings()
     state = await get_polling_state(task_name)
     failure_count = 0 if success else (state.failure_count + 1 if state else 1)
@@ -136,7 +136,7 @@ def _next_daytime_start(now: datetime, settings: Settings) -> datetime:
     )
     if candidate <= local_now:
         candidate += timedelta(days=1)
-    return candidate.astimezone(timezone.utc)
+    return candidate.astimezone(UTC)
 
 
 def _parse_time(value: str) -> time:

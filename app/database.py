@@ -103,7 +103,12 @@ async def init_database() -> None:
         await db.commit()
 
 
-async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, definition: str) -> None:
+async def _ensure_column(
+    db: aiosqlite.Connection,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
     cursor = await db.execute(f"PRAGMA table_info({table})")
     columns = {row["name"] for row in await cursor.fetchall()}
     if column not in columns:

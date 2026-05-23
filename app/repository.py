@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.database import open_database
 from app.schemas import CredentialRequest, SubscriptionRequest
@@ -64,7 +64,10 @@ async def upsert_subscription(payload: SubscriptionRequest) -> int:
         await db.commit()
         if cursor.lastrowid:
             return int(cursor.lastrowid)
-        existing = await db.execute("SELECT id FROM subscriptions WHERE email = ?", (str(payload.email),))
+        existing = await db.execute(
+            "SELECT id FROM subscriptions WHERE email = ?",
+            (str(payload.email),),
+        )
         row = await existing.fetchone()
         return int(row["id"])
 
@@ -116,8 +119,14 @@ async def delete_subscription(email: str) -> bool:
         if row is None:
             return False
         subscription_id = int(row["id"])
-        await db.execute("DELETE FROM notification_events WHERE subscription_id = ?", (subscription_id,))
-        await db.execute("DELETE FROM credential_vault WHERE subscription_id = ?", (subscription_id,))
+        await db.execute(
+            "DELETE FROM notification_events WHERE subscription_id = ?",
+            (subscription_id,),
+        )
+        await db.execute(
+            "DELETE FROM credential_vault WHERE subscription_id = ?",
+            (subscription_id,),
+        )
         await db.execute("DELETE FROM subscriptions WHERE id = ?", (subscription_id,))
         await db.commit()
         return True
@@ -170,6 +179,44 @@ async def mark_login_success(subscription_id: int) -> None:
         await db.commit()
 
 
+async def update_teaching_notice_baseline(
+    subscription_id: int,
+    notice_id: int,
+    publish_time: str | None,
+) -> None:
+    async with open_database() as db:
+        await db.execute(
+            """
+            UPDATE subscriptions
+            SET last_seen_teaching_notice_id = ?,
+                last_seen_teaching_notice_time = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (notice_id, publish_time, subscription_id),
+        )
+        await db.commit()
+
+
+async def update_star_activity_baseline(
+    subscription_id: int,
+    activity_ids: list[str],
+) -> None:
+    # 只保留最近一批活动 ID，防止 JSON 字段无限增长。
+    compact_ids = list(dict.fromkeys(activity_ids))[:300]
+    async with open_database() as db:
+        await db.execute(
+            """
+            UPDATE subscriptions
+            SET last_seen_star_activity_ids = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (json.dumps(compact_ids, ensure_ascii=False), subscription_id),
+        )
+        await db.commit()
+
+
 async def record_notification_event(
     subscription_id: int,
     event_type: str,
@@ -215,7 +262,7 @@ async def upsert_polling_state(
     failure_count: int = 0,
     failure_reason: str | None = None,
 ) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     async with open_database() as db:
         await db.execute(
             """
@@ -237,7 +284,7 @@ async def upsert_polling_state(
             (
                 task_name,
                 now,
-                next_allowed_at.astimezone(timezone.utc).isoformat(),
+                next_allowed_at.astimezone(UTC).isoformat(),
                 failure_count,
                 failure_reason,
             ),
@@ -267,5 +314,5 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return None
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
+        return parsed.replace(tzinfo=UTC)
     return parsed

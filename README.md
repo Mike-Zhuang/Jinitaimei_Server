@@ -1,6 +1,6 @@
 # Jinitaimei Server
 
-济你太美的远程通知后端。当前阶段先实现邮件通知基础设施，后续再接入教务通知、卓越星活动轮询和 APNs。
+济你太美的远程通知后端。当前阶段实现邮件通知基础设施、教务通知低频轮询、卓越星公开活动低频轮询；APNs 远程推送等注册 Apple Developer Program 后再接入。
 
 ## 当前能力
 
@@ -12,6 +12,8 @@
 - SQLite 本地存储，默认路径 `./data/jinitaimei-push.sqlite3`。
 - SMTP 配置全部来自 `.env`，不写入仓库。
 - 轮询任务入口：`python -m app.jobs.poll_notifications`，内部按随机低频和夜间降频执行。
+- 教务通知：用用户显式提交的统一身份账号密码登录一系统，只拉摘要列表，发现绝对最新通知后邮件提醒。
+- 卓越星：优先使用公开活动列表，不依赖 STAR 登录；按用户选择的星星类别检测新活动和“报名进行中”状态。
 
 ## 本地运行
 
@@ -112,12 +114,38 @@ RestartSec=3
 WantedBy=multi-user.target
 ```
 
-## 后续计划
+## 轮询业务行为
 
-- 接入真实的一系统登录抓取和 STAR 私有接口登录抓取。
-- 定时检测教务通知最新标题。
-- 定时检测卓越星新活动和关注活动报名状态。
-- 邮件通知稳定后，再接 APNs 远程推送。
+### 教务通知
+
+后端使用保存的统一身份账号密码尝试普通用户名密码登录。一旦学校要求验证码、短信码、MFA 或页面结构变化，后端不绕过验证，会记录失败并给用户发送“需要重新确认凭据”的邮件。
+
+登录成功后调用：
+
+```text
+POST https://1.tongji.edu.cn/api/commonservice/commonMsgPublish/findMyCommonMsgPublish
+```
+
+每次只拉前几页摘要字段，按 `publishTime` 找绝对最新通知，不批量抓详情正文、图片或附件。首次轮询只写入基线，不把历史通知全部发送给用户；后续发现新通知才发送邮件，并通过 `notification_events` 去重。
+
+### 卓越星
+
+后端调用公开活动列表：
+
+```text
+GET https://star.tongji.edu.cn/api/app-api/activity/index/list?pageNo=1&pageSize=10&recommend=1
+```
+
+按用户选择的 `hongwen`、`mingde`、`shizhi`、`qiusuo`、`lixing` 过滤。首次轮询只建立活动 ID 基线；后续新活动发送“卓越星新活动”邮件。若活动状态为“报名进行中”，并且该订阅开启报名提醒，会发送“卓越星活动报名中”邮件。活动详情链接使用：
+
+```text
+https://star.tongji.edu.cn/app/pages-home/detail/huodong?id=<activityId>
+```
+
+### 后续计划
+
+- STAR 个人星值私有接口的离线邮件提醒。
+- APNs 远程推送。
 
 ## iOS 通信与轮询策略
 
