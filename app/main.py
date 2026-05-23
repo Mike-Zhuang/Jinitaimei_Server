@@ -5,8 +5,12 @@ from fastapi import FastAPI, Header, HTTPException, status
 from app.config import get_settings
 from app.database import init_database
 from app.mailer import send_email
-from app.repository import upsert_subscription
+from app.repository import delete_subscription, save_credentials, upsert_subscription
 from app.schemas import (
+    CredentialRequest,
+    CredentialResponse,
+    DeleteSubscriptionRequest,
+    DeleteSubscriptionResponse,
     HealthResponse,
     SubscriptionRequest,
     SubscriptionResponse,
@@ -37,6 +41,24 @@ async def health() -> HealthResponse:
 async def save_subscription(payload: SubscriptionRequest) -> SubscriptionResponse:
     await upsert_subscription(payload)
     return SubscriptionResponse(email=payload.email, saved=True)
+
+
+@app.put("/api/v1/subscriptions/credentials", response_model=CredentialResponse)
+async def save_subscription_credentials(payload: CredentialRequest) -> CredentialResponse:
+    try:
+        await save_credentials(payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return CredentialResponse(email=payload.email, saved=True)
+
+
+@app.delete("/api/v1/subscriptions", response_model=DeleteSubscriptionResponse)
+async def remove_subscription(payload: DeleteSubscriptionRequest) -> DeleteSubscriptionResponse:
+    deleted = await delete_subscription(str(payload.email))
+    return DeleteSubscriptionResponse(email=payload.email, deleted=deleted)
 
 
 @app.post("/api/v1/test-email", response_model=TestEmailResponse)

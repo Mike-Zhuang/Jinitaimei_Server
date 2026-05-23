@@ -6,9 +6,12 @@
 
 - `GET /health`：健康检查。
 - `POST /api/v1/subscriptions`：保存用户接收邮箱和通知偏好。
+- `PUT /api/v1/subscriptions/credentials`：保存用户显式提交的同济统一身份凭据，服务端加密后用于离线邮件提醒。
+- `DELETE /api/v1/subscriptions`：删除订阅、凭据和通知状态。
 - `POST /api/v1/test-email`：发送测试邮件。
 - SQLite 本地存储，默认路径 `./data/jinitaimei-push.sqlite3`。
 - SMTP 配置全部来自 `.env`，不写入仓库。
+- 轮询任务入口：`python -m app.jobs.poll_notifications`，内部按随机低频和夜间降频执行。
 
 ## 本地运行
 
@@ -69,6 +72,18 @@ SMTP_USERNAME=tjpush_admin@mikezhuang.cn
 SMTP_PASSWORD=服务器上填写
 SMTP_FROM=济你太美通知 <tjpush_admin@mikezhuang.cn>
 ADMIN_TOKEN=生成一个长随机字符串
+CREDENTIAL_ENCRYPTION_KEY=使用 Fernet 生成的密钥
+POLL_DAY_START=07:00
+POLL_NIGHT_START=23:30
+```
+
+生成 `CREDENTIAL_ENCRYPTION_KEY`：
+
+```bash
+python - <<'PY'
+from cryptography.fernet import Fernet
+print(Fernet.generate_key().decode())
+PY
 ```
 
 宝塔 / Nginx 反代目标：
@@ -99,8 +114,15 @@ WantedBy=multi-user.target
 
 ## 后续计划
 
-- 接入 App 端订阅接口。
-- 增加服务端加密保存必要凭证。
+- 接入真实的一系统登录抓取和 STAR 私有接口登录抓取。
 - 定时检测教务通知最新标题。
 - 定时检测卓越星新活动和关注活动报名状态。
 - 邮件通知稳定后，再接 APNs 远程推送。
+
+## iOS 通信与轮询策略
+
+详见 [docs/ios-server-communication.md](docs/ios-server-communication.md)。核心约束：
+
+- 用户必须显式同意后，才会把统一身份账号密码提交到服务端。
+- 服务端只保存加密后的凭据。
+- 宝塔 cron 每 10 分钟触发轮询入口即可；任务内部会用随机间隔和夜间降频决定是否真正访问学校系统。
