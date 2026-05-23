@@ -19,6 +19,7 @@ class SubscriptionRecord:
     last_seen_teaching_notice_id: int | None
     last_seen_teaching_notice_time: str | None
     last_seen_star_activity_ids: list[str]
+    last_seen_star_registration_open_ids: list[str]
     tongji_username: str | None
     encrypted_tongji_password: str | None
 
@@ -217,6 +218,24 @@ async def update_star_activity_baseline(
         await db.commit()
 
 
+async def update_star_registration_open_baseline(
+    subscription_id: int,
+    activity_ids: list[str],
+) -> None:
+    compact_ids = list(dict.fromkeys(activity_ids))[:300]
+    async with open_database() as db:
+        await db.execute(
+            """
+            UPDATE subscriptions
+            SET last_seen_star_registration_open_ids = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (json.dumps(compact_ids, ensure_ascii=False), subscription_id),
+        )
+        await db.commit()
+
+
 async def record_notification_event(
     subscription_id: int,
     event_type: str,
@@ -304,6 +323,9 @@ def _subscription_from_row(row) -> SubscriptionRecord:
         last_seen_teaching_notice_id=row["last_seen_teaching_notice_id"],
         last_seen_teaching_notice_time=row["last_seen_teaching_notice_time"],
         last_seen_star_activity_ids=json.loads(row["last_seen_star_activity_ids"] or "[]"),
+        last_seen_star_registration_open_ids=json.loads(
+            row["last_seen_star_registration_open_ids"] or "[]"
+        ),
         tongji_username=row["tongji_username"],
         encrypted_tongji_password=row["encrypted_tongji_password"],
     )

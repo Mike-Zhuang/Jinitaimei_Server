@@ -14,6 +14,7 @@ from app.repository import (
     mark_login_success,
     record_notification_event,
     update_star_activity_baseline,
+    update_star_registration_open_baseline,
     update_teaching_notice_baseline,
 )
 from app.scheduler import (
@@ -198,11 +199,13 @@ async def process_star_public_subscription(
 ) -> None:
     filtered = filter_star_activities(subscription, activities)
     current_ids = [str(activity.id) for activity in filtered]
+    current_open_ids = [str(activity.id) for activity in filtered if activity.is_registration_open]
     if not current_ids:
         return
 
     if not subscription.last_seen_star_activity_ids:
         await update_star_activity_baseline(subscription.id, current_ids)
+        await update_star_registration_open_baseline(subscription.id, current_open_ids)
         logger.info(
             "%s subscription=%s baseline activities=%s",
             TASK_STAR_PUBLIC,
@@ -212,15 +215,36 @@ async def process_star_public_subscription(
         return
 
     seen = set(subscription.last_seen_star_activity_ids)
+    previous_open = set(subscription.last_seen_star_registration_open_ids)
     new_activities = [activity for activity in filtered if str(activity.id) not in seen]
 
     for activity in new_activities:
         if subscription.star_new_activity_enabled:
             await send_star_activity_mail(subscription, activity, event_type="star_new_activity")
 
+    # 老订阅升级到新字段时，先只补当前“报名中”基线，不补发历史报名提醒。
+    if not subscription.last_seen_star_registration_open_ids:
+        await update_star_activity_baseline(
+            subscription.id,
+            current_ids + subscription.last_seen_star_activity_ids,
+        )
+        await update_star_registration_open_baseline(subscription.id, current_open_ids)
+        logger.info(
+            "%s subscription=%s seeded registration baseline=%s",
+            TASK_STAR_PUBLIC,
+            mask_email(subscription.email),
+            len(current_open_ids),
+        )
+        return
+
     if subscription.star_registration_enabled:
         for activity in filtered:
-            if activity.is_registration_open:
+            activity_id = str(activity.id)
+            if (
+                activity.is_registration_open
+                and activity_id in seen
+                and activity_id not in previous_open
+            ):
                 await send_star_activity_mail(
                     subscription,
                     activity,
@@ -230,6 +254,10 @@ async def process_star_public_subscription(
     await update_star_activity_baseline(
         subscription.id,
         current_ids + subscription.last_seen_star_activity_ids,
+    )
+    await update_star_registration_open_baseline(
+        subscription.id,
+        current_open_ids,
     )
 
 

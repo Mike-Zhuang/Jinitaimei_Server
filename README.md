@@ -136,7 +136,7 @@ POST https://1.tongji.edu.cn/api/commonservice/commonMsgPublish/findMyCommonMsgP
 GET https://star.tongji.edu.cn/api/app-api/activity/index/list?pageNo=1&pageSize=10&recommend=1
 ```
 
-按用户选择的 `hongwen`、`mingde`、`shizhi`、`qiusuo`、`lixing` 过滤。首次轮询只建立活动 ID 基线；后续新活动发送“卓越星新活动”邮件。若活动状态为“报名进行中”，并且该订阅开启报名提醒，会发送“卓越星活动报名中”邮件。活动详情链接使用：
+按用户选择的 `hongwen`、`mingde`、`shizhi`、`qiusuo`、`lixing` 过滤。首次轮询只建立活动 ID 基线；后续新活动发送“卓越星新活动”邮件。报名提醒只有在“系统之前已经见过这条活动、之前不是报名进行中、这次轮询变成报名进行中”时才会发送，并且同一活动只发一次。活动详情链接使用：
 
 ```text
 https://star.tongji.edu.cn/app/pages-home/detail/huodong?id=<activityId>

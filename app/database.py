@@ -35,6 +35,7 @@ async def init_database() -> None:
                 last_seen_teaching_notice_id INTEGER,
                 last_seen_teaching_notice_time TEXT,
                 last_seen_star_activity_ids TEXT NOT NULL DEFAULT '[]',
+                last_seen_star_registration_open_ids TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
@@ -98,6 +99,12 @@ async def init_database() -> None:
             db,
             "subscriptions",
             "last_seen_star_activity_ids",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        await _ensure_column(
+            db,
+            "subscriptions",
+            "last_seen_star_registration_open_ids",
             "TEXT NOT NULL DEFAULT '[]'",
         )
         await db.commit()
