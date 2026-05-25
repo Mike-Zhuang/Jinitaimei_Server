@@ -118,6 +118,10 @@ async def login_tongji(username: str, password: str) -> TongjiSession:
                 )
                 if _session_ready(client):
                     return _build_session(client)
+            elif _ajax_login_failed(ajax_payload):
+                raise TongjiLoginError(
+                    "一系统用户名或密码错误，或已失效，请在 App 内重新确认邮件推送凭据"
+                )
 
         if _looks_like_mfa_or_captcha(str(response.url), response.text):
             raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
@@ -267,6 +271,11 @@ def _ajax_login_succeeded(payload: dict) -> bool:
     login_failed = str(login_failed_raw or "").lower()
     view = str(payload.get("view") or "").lower()
     return login_failed_raw in {None, ""} or login_failed == "false" or view == "none"
+
+
+def _ajax_login_failed(payload: dict) -> bool:
+    login_failed = str(payload.get("loginFailed") or "").lower()
+    return login_failed == "true"
 
 
 def _session_ready(client: httpx.AsyncClient) -> bool:
