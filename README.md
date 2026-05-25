@@ -1,6 +1,6 @@
 # Jinitaimei Server
 
-济你太美的远程通知后端。当前阶段实现邮件通知基础设施、教务通知低频轮询、卓越星公开活动低频轮询；APNs 远程推送等注册 Apple Developer Program 后再接入。
+济你太美的远程通知后端。当前阶段实现邮件通知基础设施、教务通知低频轮询、卓越星公开活动低频轮询、校园卡低余额提醒；APNs 远程推送等注册 Apple Developer Program 后再接入。
 
 ## 当前能力
 
@@ -14,6 +14,7 @@
 - 轮询任务入口：`python -m app.jobs.poll_notifications`，内部按随机低频和夜间降频执行。
 - 教务通知：用用户显式提交的统一身份账号密码登录一系统，只拉摘要列表，发现绝对最新通知后邮件提醒。
 - 卓越星：优先使用公开活动列表，不依赖 STAR 登录；按用户选择的星星类别检测新活动和“报名进行中”状态。
+- 校园卡：使用统一身份登录 `pay-yikatong.tongji.edu.cn`，检测当前余额是否首次跌破用户自定义阈值。
 
 ## 本地运行
 
@@ -77,6 +78,10 @@ ADMIN_TOKEN=生成一个长随机字符串
 CREDENTIAL_ENCRYPTION_KEY=使用 Fernet 生成的密钥
 POLL_DAY_START=07:00
 POLL_NIGHT_START=23:30
+POLL_CAMPUS_CARD_DAY_MIN_MINUTES=90
+POLL_CAMPUS_CARD_DAY_MAX_MINUTES=180
+POLL_CAMPUS_CARD_NIGHT_MIN_MINUTES=240
+POLL_CAMPUS_CARD_NIGHT_MAX_MINUTES=480
 ```
 
 生成 `CREDENTIAL_ENCRYPTION_KEY`：
@@ -141,6 +146,27 @@ GET https://star.tongji.edu.cn/api/app-api/activity/index/list?pageNo=1&pageSize
 ```text
 https://star.tongji.edu.cn/app/pages-home/detail/huodong?id=<activityId>
 ```
+
+### 校园卡余额
+
+后端通过同一套统一身份账号密码进入：
+
+```text
+https://pay-yikatong.tongji.edu.cn/berserker-auth/cas/redirect/bamboocloud?targetUrl=https://pay-yikatong.tongji.edu.cn/plat/?name=loginTransit
+```
+
+登录成功后提取：
+
+- `JWTUser` / `TGC` Cookie
+- URL 中的 `synjones-auth` 令牌
+
+然后调用：
+
+```text
+GET https://pay-yikatong.tongji.edu.cn/berserker-app/ykt/tsm/queryCard?synAccessSource=h5
+```
+
+轮询只关心当前余额快照，不抓历史消费记录。首次运行只建立低余额基线；后续仅在“余额从高于阈值变为低于或等于阈值”时发送提醒邮件。余额若一直处于低位，不会连续轰炸；只有余额恢复后再次跌破才会重新提醒。
 
 ### 后续计划
 

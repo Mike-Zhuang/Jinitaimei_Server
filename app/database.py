@@ -31,12 +31,16 @@ async def init_database() -> None:
                 teaching_notice_enabled INTEGER NOT NULL DEFAULT 1,
                 star_new_activity_enabled INTEGER NOT NULL DEFAULT 1,
                 star_registration_enabled INTEGER NOT NULL DEFAULT 1,
+                campus_card_low_balance_enabled INTEGER NOT NULL DEFAULT 0,
+                campus_card_low_balance_threshold REAL NOT NULL DEFAULT 20,
                 selected_star_module_codes TEXT NOT NULL DEFAULT '[]',
                 followed_star_activity_ids TEXT NOT NULL DEFAULT '[]',
                 last_seen_teaching_notice_id INTEGER,
                 last_seen_teaching_notice_time TEXT,
                 last_seen_star_activity_ids TEXT NOT NULL DEFAULT '[]',
                 last_seen_star_registration_open_ids TEXT NOT NULL DEFAULT '[]',
+                last_seen_campus_card_balance REAL,
+                last_seen_campus_card_is_low INTEGER,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
@@ -87,6 +91,18 @@ async def init_database() -> None:
         await _ensure_column(
             db,
             "subscriptions",
+            "campus_card_low_balance_enabled",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        await _ensure_column(
+            db,
+            "subscriptions",
+            "campus_card_low_balance_threshold",
+            "REAL NOT NULL DEFAULT 20",
+        )
+        await _ensure_column(
+            db,
+            "subscriptions",
             "followed_star_activity_ids",
             "TEXT NOT NULL DEFAULT '[]'",
         )
@@ -113,6 +129,18 @@ async def init_database() -> None:
             "subscriptions",
             "last_seen_star_registration_open_ids",
             "TEXT NOT NULL DEFAULT '[]'",
+        )
+        await _ensure_column(
+            db,
+            "subscriptions",
+            "last_seen_campus_card_balance",
+            "REAL",
+        )
+        await _ensure_column(
+            db,
+            "subscriptions",
+            "last_seen_campus_card_is_low",
+            "INTEGER",
         )
         await db.commit()
 

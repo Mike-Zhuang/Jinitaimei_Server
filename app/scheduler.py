@@ -23,6 +23,7 @@ class PollWindow:
 TASK_TEACHING_NOTICE = "teaching_notice"
 TASK_STAR_PUBLIC = "star_public"
 TASK_STAR_PRIVATE = "star_private"
+TASK_CAMPUS_CARD = "campus_card"
 
 
 async def should_run_task(task_name: str, now: datetime | None = None) -> PollDecision:
@@ -112,6 +113,15 @@ def _window_for_task(task_name: str, is_night: bool, settings: Settings) -> Poll
         return PollWindow(
             settings.poll_star_private_day_min_minutes,
             settings.poll_star_private_day_max_minutes,
+        )
+    if task_name == TASK_CAMPUS_CARD:
+        return PollWindow(
+            settings.poll_campus_card_night_min_minutes
+            if is_night
+            else settings.poll_campus_card_day_min_minutes,
+            settings.poll_campus_card_night_max_minutes
+            if is_night
+            else settings.poll_campus_card_day_max_minutes,
         )
     raise ValueError(f"未知轮询任务: {task_name}")
 

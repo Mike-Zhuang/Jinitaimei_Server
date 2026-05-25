@@ -15,12 +15,16 @@ class SubscriptionRecord:
     teaching_notice_enabled: bool
     star_new_activity_enabled: bool
     star_registration_enabled: bool
+    campus_card_low_balance_enabled: bool
+    campus_card_low_balance_threshold: float
     selected_star_module_codes: list[str]
     followed_star_activity_ids: list[int]
     last_seen_teaching_notice_id: int | None
     last_seen_teaching_notice_time: str | None
     last_seen_star_activity_ids: list[str]
     last_seen_star_registration_open_ids: list[str]
+    last_seen_campus_card_balance: float | None
+    last_seen_campus_card_is_low: bool | None
     tongji_username: str | None
     encrypted_tongji_password: str | None
 
@@ -45,14 +49,18 @@ async def upsert_subscription(payload: SubscriptionRequest) -> int:
                 teaching_notice_enabled,
                 star_new_activity_enabled,
                 star_registration_enabled,
+                campus_card_low_balance_enabled,
+                campus_card_low_balance_threshold,
                 selected_star_module_codes,
                 followed_star_activity_ids
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(email) DO UPDATE SET
                 mail_push_enabled = excluded.mail_push_enabled,
                 teaching_notice_enabled = excluded.teaching_notice_enabled,
                 star_new_activity_enabled = excluded.star_new_activity_enabled,
                 star_registration_enabled = excluded.star_registration_enabled,
+                campus_card_low_balance_enabled = excluded.campus_card_low_balance_enabled,
+                campus_card_low_balance_threshold = excluded.campus_card_low_balance_threshold,
                 selected_star_module_codes = excluded.selected_star_module_codes,
                 followed_star_activity_ids = excluded.followed_star_activity_ids,
                 updated_at = CURRENT_TIMESTAMP
@@ -63,6 +71,8 @@ async def upsert_subscription(payload: SubscriptionRequest) -> int:
                 int(payload.teaching_notice_enabled),
                 int(payload.star_new_activity_enabled),
                 int(payload.star_registration_enabled),
+                int(payload.campus_card_low_balance_enabled),
+                float(payload.campus_card_low_balance_threshold),
                 module_codes,
                 followed_ids,
             ),
@@ -241,6 +251,25 @@ async def update_star_registration_open_baseline(
         await db.commit()
 
 
+async def update_campus_card_baseline(
+    subscription_id: int,
+    balance: float,
+    is_low: bool,
+) -> None:
+    async with open_database() as db:
+        await db.execute(
+            """
+            UPDATE subscriptions
+            SET last_seen_campus_card_balance = ?,
+                last_seen_campus_card_is_low = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (float(balance), int(is_low), subscription_id),
+        )
+        await db.commit()
+
+
 async def record_notification_event(
     subscription_id: int,
     event_type: str,
@@ -324,6 +353,8 @@ def _subscription_from_row(row) -> SubscriptionRecord:
         teaching_notice_enabled=bool(row["teaching_notice_enabled"]),
         star_new_activity_enabled=bool(row["star_new_activity_enabled"]),
         star_registration_enabled=bool(row["star_registration_enabled"]),
+        campus_card_low_balance_enabled=bool(row["campus_card_low_balance_enabled"]),
+        campus_card_low_balance_threshold=float(row["campus_card_low_balance_threshold"] or 0),
         selected_star_module_codes=json.loads(row["selected_star_module_codes"] or "[]"),
         followed_star_activity_ids=json.loads(row["followed_star_activity_ids"] or "[]"),
         last_seen_teaching_notice_id=row["last_seen_teaching_notice_id"],
@@ -331,6 +362,16 @@ def _subscription_from_row(row) -> SubscriptionRecord:
         last_seen_star_activity_ids=json.loads(row["last_seen_star_activity_ids"] or "[]"),
         last_seen_star_registration_open_ids=json.loads(
             row["last_seen_star_registration_open_ids"] or "[]"
+        ),
+        last_seen_campus_card_balance=(
+            float(row["last_seen_campus_card_balance"])
+            if row["last_seen_campus_card_balance"] is not None
+            else None
+        ),
+        last_seen_campus_card_is_low=(
+            bool(row["last_seen_campus_card_is_low"])
+            if row["last_seen_campus_card_is_low"] is not None
+            else None
         ),
         tongji_username=row["tongji_username"],
         encrypted_tongji_password=row["encrypted_tongji_password"],

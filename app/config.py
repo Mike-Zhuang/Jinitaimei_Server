@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     poll_star_private_day_max_minutes: int = Field(
         default=360, alias="POLL_STAR_PRIVATE_DAY_MAX_MINUTES"
     )
+    poll_campus_card_day_min_minutes: int = Field(
+        default=90, alias="POLL_CAMPUS_CARD_DAY_MIN_MINUTES"
+    )
+    poll_campus_card_day_max_minutes: int = Field(
+        default=180, alias="POLL_CAMPUS_CARD_DAY_MAX_MINUTES"
+    )
+    poll_campus_card_night_min_minutes: int = Field(
+        default=240, alias="POLL_CAMPUS_CARD_NIGHT_MIN_MINUTES"
+    )
+    poll_campus_card_night_max_minutes: int = Field(
+        default=480, alias="POLL_CAMPUS_CARD_NIGHT_MAX_MINUTES"
+    )
     poll_max_backoff_minutes: int = Field(default=720, alias="POLL_MAX_BACKOFF_MINUTES")
 
 
