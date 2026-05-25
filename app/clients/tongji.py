@@ -9,11 +9,14 @@ from http.cookies import SimpleCookie
 from urllib.parse import urljoin
 
 import httpx
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 
 logger = logging.getLogger("jinitaimei.tongji")
 
 ONE_BASE_URL = "https://1.tongji.edu.cn"
 WORKBENCH_URL = f"{ONE_BASE_URL}/workbench"
+LOGIN_ENTRY_URL = f"{ONE_BASE_URL}/api/ssoservice/system/loginIn"
 TEACHING_NOTICE_LIST_URL = (
     f"{ONE_BASE_URL}/api/commonservice/commonMsgPublish/findMyCommonMsgPublish"
 )
@@ -21,6 +24,12 @@ IPHONE_USER_AGENT = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 )
+IAM_PASSWORD_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
+MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC9t16RqQWUE/J1IyOfoNHc4r/h
+6RPnXcWTJ4IbhQVUsEqMMm65F0hiytAgozXmVw68yPJywbpblDrx9zl1wdRcdHCo
+UvmPdr9/oCQtpQyVc7BXZIN6wJlD6MTeMeni+N0toNPxfXjiAawjNHGZZuT8wQpN
+EMwsVyJ/lonXaVdGZwIDAQAB
+-----END PUBLIC KEY-----"""
 
 
 class TongjiLoginError(RuntimeError):
@@ -53,7 +62,7 @@ async def login_tongji(username: str, password: str) -> TongjiSession:
         follow_redirects=True,
         timeout=25,
     ) as client:
-        response = await client.get(WORKBENCH_URL)
+        response = await client.get(LOGIN_ENTRY_URL)
         if _session_ready(client):
             return _build_session(client)
 
@@ -70,17 +79,45 @@ async def login_tongji(username: str, password: str) -> TongjiSession:
                 response = await client.get(current_url)
                 continue
 
-            response = await client.post(
-                form.action,
-                data=form.with_credentials(username, password),
-                headers={
-                    **_default_headers(),
-                    "Origin": _origin(form.action),
-                    "Referer": current_url,
-                },
+            credentials = form.with_credentials(username, password)
+            encrypted_credentials = dict(credentials)
+            encrypted_credentials[form.password_field] = _encrypt_password(password)
+            response = await _post_login_ajax(
+                client=client,
+                ajax_url=_ajax_login_url(current_url, credentials),
+                credentials=encrypted_credentials,
+                referer=current_url,
             )
             if _session_ready(client):
                 return _build_session(client)
+
+            if _looks_like_mfa_or_captcha(str(response.url), response.text):
+                raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
+
+            ajax_payload = _json_payload(response)
+            if ajax_payload is None:
+                continue
+
+            if _ajax_requires_interaction(ajax_payload):
+                raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
+
+            if _ajax_login_succeeded(ajax_payload):
+                response = await client.post(
+                    form.action,
+                    data=encrypted_credentials,
+                    headers={
+                        **_default_headers(),
+                        "Accept": (
+                            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                            "image/avif,image/webp,image/apng,*/*;q=0.8"
+                        ),
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Origin": _origin(form.action),
+                        "Referer": current_url,
+                    },
+                )
+                if _session_ready(client):
+                    return _build_session(client)
 
         if _looks_like_mfa_or_captcha(str(response.url), response.text):
             raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
@@ -147,6 +184,89 @@ def _default_headers() -> dict[str, str]:
         "User-Agent": IPHONE_USER_AGENT,
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
+
+
+async def _post_login_ajax(
+    client: httpx.AsyncClient,
+    ajax_url: str,
+    credentials: dict[str, str],
+    referer: str,
+) -> httpx.Response:
+    return await client.post(
+        ajax_url,
+        data=credentials,
+        headers={
+            **_default_headers(),
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Origin": _origin(ajax_url),
+            "Referer": referer,
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+
+
+def _ajax_login_url(current_url: str, fields: dict[str, str]) -> str:
+    authn_lc_key = fields.get("authnLcKey", "")
+    if "authcenter/ActionAuthChain" in current_url and authn_lc_key:
+        return re.sub(
+            r"authnLcKey=[^&]+",
+            f"authnLcKey={authn_lc_key}",
+            current_url,
+            count=1,
+        )
+    return current_url
+
+
+def _encrypt_password(password: str) -> str:
+    public_key = serialization.load_pem_public_key(IAM_PASSWORD_PUBLIC_KEY_PEM.encode("utf-8"))
+    encrypted = public_key.encrypt(password.encode("utf-8"), padding.PKCS1v15())
+    return _b64encode_ascii(encrypted)
+
+
+def _b64encode_ascii(data: bytes) -> str:
+    from base64 import b64encode
+
+    return b64encode(data).decode("ascii")
+
+
+def _json_payload(response: httpx.Response) -> dict | None:
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "json" not in content_type and not response.text.strip().startswith("{"):
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _ajax_requires_interaction(payload: dict) -> bool:
+    view = str(payload.get("view") or "")
+    if view.isdigit():
+        return True
+    return view in {
+        "biometrics",
+        "frexcept",
+        "faceexcept",
+        "voiceexcept",
+        "gestureexcept",
+        "face",
+        "voice",
+        "bindCertUid",
+        "bindWechatUid",
+        "bindEyekeyUid",
+        "modify_password",
+        "remind_password",
+        "certificationView",
+    }
+
+
+def _ajax_login_succeeded(payload: dict) -> bool:
+    login_failed_raw = payload.get("loginFailed")
+    login_failed = str(login_failed_raw or "").lower()
+    view = str(payload.get("view") or "").lower()
+    return login_failed_raw in {None, ""} or login_failed == "false" or view == "none"
 
 
 def _session_ready(client: httpx.AsyncClient) -> bool:
