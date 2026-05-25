@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+import urllib.parse
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.cookies import SimpleCookie
@@ -80,48 +81,49 @@ async def login_tongji(username: str, password: str) -> TongjiSession:
                 continue
 
             credentials = form.with_credentials(username, password)
-            encrypted_credentials = dict(credentials)
-            encrypted_credentials[form.password_field] = _encrypt_password(password)
+            serialized_credentials = _serialize_ajax_credentials(form, credentials, password)
             response = await _post_login_ajax(
                 client=client,
                 ajax_url=_ajax_login_url(current_url, credentials),
-                credentials=encrypted_credentials,
+                serialized_credentials=serialized_credentials,
                 referer=current_url,
             )
             if _session_ready(client):
                 return _build_session(client)
 
+            ajax_payload = _json_payload(response)
+            if ajax_payload is not None:
+                if _ajax_login_failed(ajax_payload):
+                    raise TongjiLoginError(
+                        "一系统用户名或密码错误，或已失效，请在 App 内重新确认邮件推送凭据"
+                    )
+
+                if _ajax_requires_interaction(ajax_payload):
+                    raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
+
+                if _ajax_login_succeeded(ajax_payload):
+                    response = await client.post(
+                        form.action,
+                        data=credentials,
+                        headers={
+                            **_default_headers(),
+                            "Accept": (
+                                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                                "image/avif,image/webp,image/apng,*/*;q=0.8"
+                            ),
+                            "Content-Type": "application/x-www-form-urlencoded",
+                            "Origin": _origin(form.action),
+                            "Referer": current_url,
+                        },
+                    )
+                    if _session_ready(client):
+                        return _build_session(client)
+                continue
+
             if _looks_like_mfa_or_captcha(str(response.url), response.text):
                 raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
 
-            ajax_payload = _json_payload(response)
-            if ajax_payload is None:
-                continue
-
-            if _ajax_requires_interaction(ajax_payload):
-                raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
-
-            if _ajax_login_succeeded(ajax_payload):
-                response = await client.post(
-                    form.action,
-                    data=encrypted_credentials,
-                    headers={
-                        **_default_headers(),
-                        "Accept": (
-                            "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                            "image/avif,image/webp,image/apng,*/*;q=0.8"
-                        ),
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Origin": _origin(form.action),
-                        "Referer": current_url,
-                    },
-                )
-                if _session_ready(client):
-                    return _build_session(client)
-            elif _ajax_login_failed(ajax_payload):
-                raise TongjiLoginError(
-                    "一系统用户名或密码错误，或已失效，请在 App 内重新确认邮件推送凭据"
-                )
+            logger.warning("一系统 AJAX 响应无法解析为 JSON，继续跟随下一跳：%s", current_url)
 
         if _looks_like_mfa_or_captcha(str(response.url), response.text):
             raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
@@ -193,12 +195,12 @@ def _default_headers() -> dict[str, str]:
 async def _post_login_ajax(
     client: httpx.AsyncClient,
     ajax_url: str,
-    credentials: dict[str, str],
+    serialized_credentials: str,
     referer: str,
 ) -> httpx.Response:
     return await client.post(
         ajax_url,
-        data=credentials,
+        content=serialized_credentials,
         headers={
             **_default_headers(),
             "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -328,6 +330,7 @@ def _find_login_form(text: str, base_url: str) -> _LoginForm | None:
             continue
         action = _form_action(form_html, base_url)
         fields = _hidden_and_text_fields(form_html)
+        _hydrate_auth_chain_code(text, fields)
         return _LoginForm(
             action=action,
             fields=fields,
@@ -377,6 +380,59 @@ def _hidden_and_text_fields(form_html: str) -> dict[str, str]:
             continue
         fields[name] = attrs.get("value", "")
     return fields
+
+
+def _hydrate_auth_chain_code(page_html: str, fields: dict[str, str]) -> None:
+    if fields.get("spAuthChainCode"):
+        return
+
+    auth_method_id = _first_match(
+        page_html,
+        [
+            r"var\s+authMethodIDs\s*=\s*'([^']+)'",
+            r'id="authMethodIDs"\s+value=([0-9]+)',
+            r'id="authMethodIDs"\s+value="([0-9]+)"',
+        ],
+    )
+    if not auth_method_id:
+        return
+
+    auth_chain_code = _first_match(
+        page_html,
+        [
+            rf'\$\(spCode\)\.val\(\'([0-9a-f]+)\'\)',
+            rf'\$\("#spAuthChainCode{re.escape(auth_method_id)}"\)\.val\(\'([0-9a-f]+)\'\)',
+            rf'\$\("#spAuthChainCode{re.escape(auth_method_id)}"\)\.val\("([0-9a-f]+)"\)',
+        ],
+    )
+    if auth_chain_code:
+        fields["spAuthChainCode"] = auth_chain_code
+
+
+def _serialize_ajax_credentials(
+    form: _LoginForm,
+    credentials: dict[str, str],
+    password: str,
+) -> str:
+    serialized = urllib.parse.urlencode(credentials)
+    encoded_plain_password = urllib.parse.quote_plus(password)
+    encrypted_password = _encrypt_password(password)
+    password_pair = f"{form.password_field}={encoded_plain_password}"
+    if password_pair in serialized:
+        return serialized.replace(
+            password_pair,
+            f"{form.password_field}={encrypted_password}",
+            1,
+        )
+    return serialized
+
+
+def _first_match(text: str, patterns: list[str]) -> str | None:
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return html.unescape(match.group(1))
+    return None
 
 
 def _attrs(tag_html: str) -> dict[str, str]:
