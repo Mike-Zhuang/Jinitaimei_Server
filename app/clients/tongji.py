@@ -21,6 +21,7 @@ LOGIN_ENTRY_URL = f"{ONE_BASE_URL}/api/ssoservice/system/loginIn"
 TEACHING_NOTICE_LIST_URL = (
     f"{ONE_BASE_URL}/api/commonservice/commonMsgPublish/findMyCommonMsgPublish"
 )
+SESSION_LOGIN_URL = f"{ONE_BASE_URL}/api/sessionservice/session/login"
 IPHONE_USER_AGENT = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
@@ -118,12 +119,18 @@ async def login_tongji(username: str, password: str) -> TongjiSession:
                     )
                     if _session_ready(client):
                         return _build_session(client)
+                    ssologin_session = await _try_exchange_ssologin_session(client, response)
+                    if ssologin_session is not None:
+                        return ssologin_session
                 continue
 
             if _looks_like_mfa_or_captcha(str(response.url), response.text):
                 raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
 
             logger.warning("一系统 AJAX 响应无法解析为 JSON，继续跟随下一跳：%s", current_url)
+            ssologin_session = await _try_exchange_ssologin_session(client, response)
+            if ssologin_session is not None:
+                return ssologin_session
 
         if _looks_like_mfa_or_captcha(str(response.url), response.text):
             raise TongjiLoginError("一系统需要验证码或二次验证，请在 App 内重新确认登录")
@@ -290,6 +297,66 @@ def _build_session(client: httpx.AsyncClient) -> TongjiSession:
         raise TongjiLoginError("一系统 sessionid 为空")
     cookie_header = _cookie_header(client)
     return TongjiSession(cookie_header=cookie_header, x_token=sessionid)
+
+
+async def _try_exchange_ssologin_session(
+    client: httpx.AsyncClient,
+    response: httpx.Response,
+) -> TongjiSession | None:
+    params = _extract_ssologin_params(response)
+    if params is None:
+        return None
+
+    logger.info("命中 ssologin 回跳，开始补做 session/login 交换")
+    exchange = await client.post(
+        SESSION_LOGIN_URL,
+        json=params,
+        headers={
+            **_default_headers(),
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json;charset=UTF-8",
+            "Origin": ONE_BASE_URL,
+            "Referer": _ssologin_referer(params),
+        },
+    )
+    exchange.raise_for_status()
+    payload = _json_payload(exchange)
+    if payload is None:
+        raise TongjiLoginError("一系统 session/login 响应无法解析")
+
+    code = int(payload.get("code", -1))
+    if code == 313:
+        raise TongjiLoginError("一系统账号已冻结，请在学校系统中处理后再开启邮件推送")
+    if code != 200:
+        message = str(payload.get("msg") or "").strip()
+        raise TongjiLoginError(message or f"一系统 session/login 返回异常 code={code}")
+
+    data = payload.get("data") or {}
+    sessionid = str(data.get("sessionid") or "").strip()
+    if not sessionid:
+        raise TongjiLoginError("一系统 session/login 未返回 sessionid")
+
+    cookie_header = _cookie_header(client)
+    return TongjiSession(cookie_header=cookie_header, x_token=sessionid)
+
+
+def _extract_ssologin_params(response: httpx.Response) -> dict[str, str] | None:
+    chain = list(response.history) + [response]
+    for item in reversed(chain):
+        url = item.url
+        if "/ssologin" not in str(url):
+            continue
+        uid = url.params.get("uid")
+        token = url.params.get("token")
+        ts = url.params.get("ts")
+        if uid and token:
+            return {"uid": uid, "token": token, "ts": ts or ""}
+    return None
+
+
+def _ssologin_referer(params: dict[str, str]) -> str:
+    query = urllib.parse.urlencode(params)
+    return f"{ONE_BASE_URL}/ssologin?{query}"
 
 
 def _cookie_header(client: httpx.AsyncClient) -> str:
