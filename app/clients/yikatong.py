@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.cookies import SimpleCookie
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
@@ -22,6 +22,7 @@ from app.clients.tongji import (
     _looks_like_mfa_or_captcha,
     _origin,
     _post_login_ajax,
+    _serialize_ajax_credentials,
 )
 
 logger = logging.getLogger("jinitaimei.yikatong")
@@ -33,8 +34,12 @@ YIKATONG_LOGIN_ENTRY_URL = (
     "?targetUrl=https://pay-yikatong.tongji.edu.cn/plat/?name=loginTransit"
 )
 YIKATONG_WALLET_URL = f"{YIKATONG_BASE_URL}/plat/wode"
+YIKATONG_TOKEN_URL = f"{YIKATONG_BASE_URL}/berserker-auth/oauth/token"
 YIKATONG_BALANCE_API = (
     f"{YIKATONG_BASE_URL}/berserker-app/ykt/tsm/queryCard?synAccessSource=h5"
+)
+YIKATONG_MOBILE_BASIC_AUTH = (
+    "Basic bW9iaWxlX3NlcnZpY2VfcGxhdGZvcm06bW9iaWxlX3NlcnZpY2VfcGxhdGZvcm1fc2VjcmV0"
 )
 
 
@@ -65,7 +70,7 @@ async def login_yikatong(username: str, password: str) -> YikatongSession:
         timeout=25,
     ) as client:
         response = await client.get(await _resolve_sso_entry_url())
-        session = _build_yikatong_session(client, response)
+        session = await _build_yikatong_session(client, response)
         if session is not None:
             return session
         session = await _probe_yikatong_session(client)
@@ -81,7 +86,7 @@ async def login_yikatong(username: str, password: str) -> YikatongSession:
             form = _find_login_form(text, current_url)
             if form is None:
                 response = await _continue_without_form(client, current_url)
-                session = _build_yikatong_session(client, response)
+                session = await _build_yikatong_session(client, response)
                 if session is not None:
                     return session
                 session = await _probe_yikatong_session(client)
@@ -92,14 +97,15 @@ async def login_yikatong(username: str, password: str) -> YikatongSession:
             credentials = form.with_credentials(username, password)
             encrypted_credentials = dict(credentials)
             encrypted_credentials[form.password_field] = _encrypt_password(password)
+            serialized_credentials = _serialize_ajax_credentials(form, credentials, password)
 
             response = await _post_login_ajax(
                 client=client,
                 ajax_url=_ajax_login_url(current_url, credentials),
-                credentials=encrypted_credentials,
+                serialized_credentials=serialized_credentials,
                 referer=current_url,
             )
-            session = _build_yikatong_session(client, response)
+            session = await _build_yikatong_session(client, response)
             if session is not None:
                 return session
 
@@ -128,7 +134,7 @@ async def login_yikatong(username: str, password: str) -> YikatongSession:
                         "Referer": current_url,
                     },
                 )
-                session = _build_yikatong_session(client, response)
+                session = await _build_yikatong_session(client, response)
                 if session is not None:
                     return session
                 session = await _probe_yikatong_session(client)
@@ -144,17 +150,16 @@ async def login_yikatong(username: str, password: str) -> YikatongSession:
 
 async def fetch_campus_card_balance(session: YikatongSession) -> CampusCardBalanceSummary:
     async with httpx.AsyncClient(headers=_default_headers(), timeout=25) as client:
-        response = await client.get(
-            YIKATONG_BALANCE_API,
-            headers={
-                **_default_headers(),
-                "Accept": "application/json, text/plain, */*",
-                "Cookie": session.cookie_header,
-                "synjones-auth": f"bearer {session.bearer_token}",
-                "synaccesssource": "h5",
-                "Referer": YIKATONG_WALLET_URL,
-            },
-        )
+        headers = {
+            **_default_headers(),
+            "Accept": "application/json, text/plain, */*",
+            "synjones-auth": f"bearer {session.bearer_token}",
+            "synaccesssource": "h5",
+            "Referer": YIKATONG_WALLET_URL,
+        }
+        if session.cookie_header:
+            headers["Cookie"] = session.cookie_header
+        response = await client.get(YIKATONG_BALANCE_API, headers=headers)
         if response.status_code in {401, 403}:
             raise YikatongLoginError("校园卡凭证已失效，请在 App 内重新确认邮件推送凭据")
         response.raise_for_status()
@@ -175,13 +180,22 @@ async def fetch_campus_card_balance(session: YikatongSession) -> CampusCardBalan
         )
 
 
-def _build_yikatong_session(
+async def _build_yikatong_session(
     client: httpx.AsyncClient,
     response: httpx.Response,
 ) -> YikatongSession | None:
     token = _extract_token_from_response(response)
+    if not token:
+        ticket = _extract_ticket_from_response(response)
+        if ticket:
+            token = await _exchange_ticket_for_token(client, ticket, _extract_target_url(response))
     cookie_header = _yikatong_cookie_header(client)
-    if token and cookie_header:
+    if token:
+        logger.info(
+            "yikatong session ready token_len=%s cookie_names=%s",
+            len(token),
+            _cookie_names_for_log(cookie_header),
+        )
         return YikatongSession(cookie_header=cookie_header, bearer_token=token)
     return None
 
@@ -196,7 +210,73 @@ def _extract_token_from_response(response: httpx.Response) -> str | None:
         raw = httpx.QueryParams(f"synjones-auth={match.group(1)}").get("synjones-auth") or ""
         token = raw.removeprefix("bearer ").strip()
         return token or None
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        token = str(payload.get("access_token") or "").strip()
+        token = token.removeprefix("bearer ").strip()
+        return token if len(token) >= 32 else None
     return None
+
+
+def _extract_ticket_from_response(response: httpx.Response) -> str | None:
+    for candidate in _response_urls(response):
+        parsed = urlparse(candidate)
+        raw = httpx.QueryParams(parsed.query).get("ticket")
+        if raw:
+            return raw
+    return None
+
+
+def _extract_target_url(response: httpx.Response) -> str | None:
+    for candidate in reversed(_response_urls(response)):
+        parsed = urlparse(candidate)
+        raw = httpx.QueryParams(parsed.query).get("targetUrl")
+        if raw:
+            return raw
+    return None
+
+
+async def _exchange_ticket_for_token(
+    client: httpx.AsyncClient,
+    ticket: str,
+    target_url: str | None = None,
+) -> str | None:
+    payload = {
+        "username": ticket,
+        "password": ticket,
+        "grant_type": "password",
+        "scope": "all",
+        "loginFrom": "app",
+        "logintype": "sso",
+        "device_token": "h5",
+    }
+    logger.info("yikatong exchanging loginTransit ticket for token ticket_len=%s", len(ticket))
+    response = await client.post(
+        YIKATONG_TOKEN_URL,
+        content=urlencode(payload),
+        headers={
+            **_default_headers(),
+            "Accept": "application/json, text/plain, */*",
+            "Authorization": YIKATONG_MOBILE_BASIC_AUTH,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": YIKATONG_BASE_URL,
+            "Referer": target_url or YIKATONG_WALLET_URL,
+        },
+    )
+    if response.status_code in {401, 403}:
+        raise YikatongLoginError("校园卡 ticket 换取 token 被拒绝，请重新确认邮件推送凭据")
+    response.raise_for_status()
+    token = _extract_token_from_response(response)
+    if token:
+        logger.info(
+            "yikatong exchanged ticket token_len=%s cookie_names=%s",
+            len(token),
+            _cookie_names_for_log(_yikatong_cookie_header(client)),
+        )
+    return token
 
 
 def _response_urls(response: httpx.Response) -> list[str]:
@@ -207,7 +287,8 @@ def _response_urls(response: httpx.Response) -> list[str]:
 
 def _extract_token_from_url(url: str) -> str | None:
     parsed = urlparse(url)
-    raw = httpx.QueryParams(parsed.query).get("synjones-auth")
+    query = parse_qs(parsed.query)
+    raw = (query.get("synjones-auth") or [None])[0]
     if not raw:
         return None
     token = raw.removeprefix("bearer ").strip()
@@ -220,10 +301,19 @@ def _yikatong_cookie_header(client: httpx.AsyncClient) -> str:
         host = (item.domain or "").lower()
         if "pay-yikatong.tongji.edu.cn" not in host:
             continue
-        if item.name not in {"JWTUser", "TGC"}:
-            continue
         cookie[item.name] = item.value
     return "; ".join(f"{morsel.key}={morsel.value}" for morsel in cookie.values())
+
+
+def _cookie_names_for_log(cookie_header: str) -> str:
+    if not cookie_header:
+        return ""
+    names = []
+    for item in cookie_header.split(";"):
+        name = item.strip().split("=", 1)[0]
+        if name:
+            names.append(name)
+    return ",".join(sorted(set(names)))
 
 
 async def _resolve_sso_entry_url() -> str:
@@ -274,7 +364,7 @@ async def _probe_yikatong_session(client: httpx.AsyncClient) -> YikatongSession 
             response = await client.get(url)
         except httpx.HTTPError:
             continue
-        session = _build_yikatong_session(client, response)
+        session = await _build_yikatong_session(client, response)
         if session is not None:
             return session
     return None

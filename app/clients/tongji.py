@@ -467,7 +467,7 @@ def _hydrate_auth_chain_code(page_html: str, fields: dict[str, str]) -> None:
     auth_chain_code = _first_match(
         page_html,
         [
-            rf'\$\(spCode\)\.val\(\'([0-9a-f]+)\'\)',
+            r'\$\(spCode\)\.val\(\'([0-9a-f]+)\'\)',
             rf'\$\("#spAuthChainCode{re.escape(auth_method_id)}"\)\.val\(\'([0-9a-f]+)\'\)',
             rf'\$\("#spAuthChainCode{re.escape(auth_method_id)}"\)\.val\("([0-9a-f]+)"\)',
         ],

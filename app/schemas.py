@@ -13,7 +13,7 @@ class SubscriptionRequest(BaseModel):
     star_new_activity_enabled: bool = True
     star_registration_enabled: bool = True
     campus_card_low_balance_enabled: bool = False
-    campus_card_low_balance_threshold: float = 20.0
+    campus_card_low_balance_threshold: float = 50.0
     selected_star_module_codes: list[str] = Field(default_factory=list)
     followed_star_activity_ids: list[int] = Field(default_factory=list)
 

@@ -28,7 +28,7 @@
   "star_new_activity_enabled": true,
   "star_registration_enabled": true,
   "campus_card_low_balance_enabled": true,
-  "campus_card_low_balance_threshold": 20,
+  "campus_card_low_balance_threshold": 50,
   "selected_star_module_codes": ["hongwen", "mingde", "shizhi", "qiusuo", "lixing"],
   "followed_star_activity_ids": [3748, 3763]
 }
@@ -99,10 +99,10 @@
 
 ### 校园卡余额
 
-1. 用户在 App 设置里开启“校园卡低余额提醒”，并填写阈值，例如 `9`、`20`、`50` 元。
+1. 用户在 App 设置里开启“校园卡低余额提醒”，并填写阈值，默认 `50` 元，可改为 `9`、`20` 等。
 2. App 把 `campus_card_low_balance_enabled` 与 `campus_card_low_balance_threshold` 同步给后端。
 3. 轮询任务到达允许时间后，后端使用同一套统一身份账号密码访问 `pay-yikatong.tongji.edu.cn` 的统一身份登录入口。
-4. 后端提取校园卡访问所需的 `JWTUser/TGC` Cookie 与 `synjones-auth` 令牌。
+4. 后端提取校园卡访问所需的 Cookie 与 `synjones-auth` 令牌；如果回跳停在 `loginTransit`，则使用 URL 中的 `ticket` 调用校园卡 H5 同款 `/berserker-auth/oauth/token` 接口换取 `access_token`。
 5. 后端请求校园卡余额接口，只取当前余额快照，不抓历史消费流水。
 6. 首次运行只建立基线，不补发历史低余额提醒。
 7. 后续只有在“上一轮高于阈值、这一轮低于或等于阈值”时才发送一封低余额提醒邮件；余额若一直处于低位，不会反复发。
@@ -114,4 +114,5 @@
 - 已完成：教务通知摘要低频轮询、首次基线、后续新通知邮件、登录失败邮件提示。
 - 已完成：卓越星公开活动低频轮询、类别过滤、首次基线、新活动邮件、报名开始状态迁移邮件。
 - 已完成：校园卡低余额阈值同步、服务端校园卡低余额基线与状态迁移邮件逻辑。
+- 已完成：校园卡 `loginTransit ticket → access_token` 交换、脱敏诊断任务、低余额跨阈值去重邮件。
 - 未接入：STAR 个人星值私有接口离线邮件提醒、APNs 远程推送。

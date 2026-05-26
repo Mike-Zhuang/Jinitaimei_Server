@@ -357,7 +357,7 @@ async def process_campus_card_subscription(subscription: SubscriptionRecord) -> 
 
     snapshot = await fetch_campus_card_balance(session)
     threshold = max(0.0, float(subscription.campus_card_low_balance_threshold))
-    is_low = snapshot.balance_yuan <= threshold
+    is_low = snapshot.balance_yuan < threshold
     previous_state = subscription.last_seen_campus_card_is_low
 
     # 首次只建基线，不补发历史低余额邮件。
@@ -389,7 +389,7 @@ async def process_campus_card_subscription(subscription: SubscriptionRecord) -> 
                     f"提醒阈值：¥{threshold:.2f}\n"
                     f"账户：{snapshot.account or '未知'}\n"
                     f"更新时间：{format_datetime(snapshot.captured_at)}\n\n"
-                    "只有在余额从高于阈值再次跌破阈值时，才会再次提醒。"
+                    "只有在余额从不低于阈值再次跌破阈值时，才会再次提醒。"
                 ),
             )
             logger.info(

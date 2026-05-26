@@ -32,7 +32,7 @@ async def init_database() -> None:
                 star_new_activity_enabled INTEGER NOT NULL DEFAULT 1,
                 star_registration_enabled INTEGER NOT NULL DEFAULT 1,
                 campus_card_low_balance_enabled INTEGER NOT NULL DEFAULT 0,
-                campus_card_low_balance_threshold REAL NOT NULL DEFAULT 20,
+                campus_card_low_balance_threshold REAL NOT NULL DEFAULT 50,
                 selected_star_module_codes TEXT NOT NULL DEFAULT '[]',
                 followed_star_activity_ids TEXT NOT NULL DEFAULT '[]',
                 last_seen_teaching_notice_id INTEGER,
@@ -98,7 +98,7 @@ async def init_database() -> None:
             db,
             "subscriptions",
             "campus_card_low_balance_threshold",
-            "REAL NOT NULL DEFAULT 20",
+            "REAL NOT NULL DEFAULT 50",
         )
         await _ensure_column(
             db,

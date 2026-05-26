@@ -12,6 +12,7 @@
 - SQLite 本地存储，默认路径 `./data/jinitaimei-push.sqlite3`。
 - SMTP 配置全部来自 `.env`，不写入仓库。
 - 轮询任务入口：`python -m app.jobs.poll_notifications`，内部按随机低频和夜间降频执行。
+- 校园卡诊断入口：`python -m app.jobs.diagnose_yikatong`，仅用环境变量传入调试账号，日志全程脱敏。
 - 教务通知：用用户显式提交的统一身份账号密码登录一系统，只拉摘要列表，发现绝对最新通知后邮件提醒。
 - 卓越星：优先使用公开活动列表，不依赖 STAR 登录；按用户选择的星星类别检测新活动和“报名进行中”状态。
 - 校园卡：使用统一身份登录 `pay-yikatong.tongji.edu.cn`，检测当前余额是否首次跌破用户自定义阈值。
@@ -157,8 +158,9 @@ https://pay-yikatong.tongji.edu.cn/berserker-auth/cas/redirect/bamboocloud?targe
 
 登录成功后提取：
 
-- `JWTUser` / `TGC` Cookie
+- 校园卡域名下的 Cookie（日志只输出 Cookie 名称）
 - URL 中的 `synjones-auth` 令牌
+- `loginTransit` 回跳 URL 里的 `ticket`，再按校园卡 H5 的真实逻辑调用 `/berserker-auth/oauth/token` 换取 `access_token`
 
 然后调用：
 
@@ -167,6 +169,17 @@ GET https://pay-yikatong.tongji.edu.cn/berserker-app/ykt/tsm/queryCard?synAccess
 ```
 
 轮询只关心当前余额快照，不抓历史消费记录。首次运行只建立低余额基线；后续仅在“余额从高于阈值变为低于或等于阈值”时发送提醒邮件。余额若一直处于低位，不会连续轰炸；只有余额恢复后再次跌破才会重新提醒。
+
+手动诊断校园卡链路时，不要把账号密码写入命令历史，使用临时环境变量：
+
+```bash
+cd /opt/jinitaimei-push
+YIKATONG_DEBUG_USERNAME="学号" \
+YIKATONG_DEBUG_PASSWORD="密码" \
+  .venv/bin/python -m app.jobs.diagnose_yikatong
+```
+
+期望日志只包含：脱敏学号、token 长度、Cookie 是否存在、余额接口是否成功；不得出现密码、Token 或 Cookie 值。
 
 ### 后续计划
 
